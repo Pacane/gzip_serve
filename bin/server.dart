@@ -1,32 +1,33 @@
+import 'dart:async' show runZonedGuarded;
 import 'dart:io';
 
-import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart';
-import 'package:shelf_router/shelf_router.dart';
+import 'package:path/path.dart' show join, dirname;
+import 'package:shelf/shelf.dart' as shelf;
+import 'package:shelf/shelf_io.dart' as shelf_io;
+import 'package:shelf_gzip/shelf_gzip.dart';
+import 'package:shelf_static/shelf_static.dart';
 
-// Configure routes.
-final _router = Router()
-  ..get('/', _rootHandler)
-  ..get('/echo/<message>', _echoHandler);
+void main() {
+  // Assumes the server lives in bin/ and that `pub build` ran
+  final pathToBuild = join(
+    dirname(Platform.script.toFilePath()),
+    'web',
+  );
+  final staticHandler = createStaticHandler(
+    pathToBuild,
+    defaultDocument: 'index.html',
+  );
 
-Response _rootHandler(Request req) {
-  return Response.ok('Hello, World!\n');
-}
+  final portEnv = Platform.environment['PORT'];
+  final port = portEnv == null ? 9999 : int.parse(portEnv);
 
-Response _echoHandler(Request request) {
-  final message = request.params['message'];
-  return Response.ok('$message\n');
-}
+  runZonedGuarded(() async {
+    final handler = const shelf.Pipeline()
+        .addMiddleware(gzipMiddleware)
+        .addHandler(staticHandler);
 
-void main(List<String> args) async {
-  // Use any available host or container IP (usually `0.0.0.0`).
-  final ip = InternetAddress.anyIPv4;
+    await shelf_io.serve(handler, '0.0.0.0', port);
 
-  // Configure a pipeline that logs requests.
-  final handler = Pipeline().addMiddleware(logRequests()).addHandler(_router);
-
-  // For running in containers, we respect the PORT environment variable.
-  final port = int.parse(Platform.environment['PORT'] ?? '8080');
-  final server = await serve(handler, ip, port);
-  print('Server listening on port ${server.port}');
+    print("Serving $pathToBuild on port $port");
+  }, (e, stackTrace) => print('Server error: $e $stackTrace'));
 }
